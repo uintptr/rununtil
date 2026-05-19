@@ -36,9 +36,9 @@ impl UserArgs {
     }
 }
 
-fn time_until(target: &NaiveTime) -> (i64, i64, i64) {
+fn time_until(target: NaiveTime) -> (i64, i64, i64) {
     let now = Local::now().time();
-    let mut diff = *target - now; // chrono::Duration
+    let mut diff = target - now; // chrono::Duration
     if diff < Duration::zero() {
         diff += Duration::days(1); // assume tomorrow
     }
@@ -72,9 +72,7 @@ fn parse_time(time_spec: &str) -> Result<NaiveTime> {
 }
 
 fn run_until(seconds: f64, command_line: &[String]) -> Result<()> {
-    let program = command_line
-        .first()
-        .ok_or_else(|| anyhow!("program is missing"))?;
+    let program = command_line.first().ok_or_else(|| anyhow!("program is missing"))?;
 
     let program = which(program).with_context(|| format!("Unable to find {program} in PATH"))?;
 
@@ -89,14 +87,13 @@ fn run_until(seconds: f64, command_line: &[String]) -> Result<()> {
 
     let timeout = std::time::Duration::from_secs_f64(seconds);
 
-    let status = match child.wait_timeout(timeout)? {
-        Some(v) => v.code().unwrap_or(-1),
-        None => {
-            warn!("{} timed out, signaling", program.display());
-            child.kill().context("Unable to kill sub process")?;
-            let code = child.wait().context("Wait failure")?;
-            code.code().unwrap_or(-1)
-        }
+    let status = if let Some(v) = child.wait_timeout(timeout)? {
+        v.code().unwrap_or(-1)
+    } else {
+        warn!("{} timed out, signaling", program.display());
+        child.kill().context("Unable to kill sub process")?;
+        let code = child.wait().context("Wait failure")?;
+        code.code().unwrap_or(-1)
     };
 
     info!("{} returned {status}", program.display());
@@ -105,8 +102,8 @@ fn run_until(seconds: f64, command_line: &[String]) -> Result<()> {
 }
 
 fn run(args: &UserArgs) -> Result<()> {
-    let timeout = parse_time(&args.time)
-        .with_context(|| format!("Unable to parse time spectification \"{}\"", args.time))?;
+    let timeout =
+        parse_time(&args.time).with_context(|| format!("Unable to parse time spectification \"{}\"", args.time))?;
 
     let now = Local::now().time();
 
@@ -117,7 +114,7 @@ fn run(args: &UserArgs) -> Result<()> {
     };
 
     if !args.quiet {
-        let (hours, minutes, seconds) = time_until(&timeout);
+        let (hours, minutes, seconds) = time_until(timeout);
         println!("hours={hours} minutes={minutes} seconds={seconds}");
     }
 
@@ -136,7 +133,7 @@ fn main() -> Result<()> {
         loop {
             run(&args)?;
             info!("sleeping for {} seconds", args.restart_delay);
-            sleep(std::time::Duration::from_secs(args.restart_delay))
+            sleep(std::time::Duration::from_secs(args.restart_delay));
         }
     } else {
         run(&args)
