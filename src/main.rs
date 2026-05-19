@@ -90,7 +90,7 @@ fn run_until(seconds: f64, command_line: &[String]) -> Result<()> {
     let status = if let Some(v) = child.wait_timeout(timeout)? {
         v.code().unwrap_or(-1)
     } else {
-        warn!("{} timed out, signaling", program.display());
+        warn!("{} timed out, signaling...", program.display());
         child.kill().context("Unable to kill sub process")?;
         let code = child.wait().context("Wait failure")?;
         code.code().unwrap_or(-1)
@@ -131,7 +131,7 @@ fn main() -> Result<()> {
 
     if args.restart {
         loop {
-            run(&args)?;
+            run(&args).context("run failed")?;
             info!("sleeping for {} seconds", args.restart_delay);
             sleep(std::time::Duration::from_secs(args.restart_delay));
         }

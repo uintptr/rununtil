@@ -40,3 +40,9 @@ Logging is via `env_logger`; set `RUST_LOG=info` for details.
 ```sh
 cargo build --release
 ```
+
+## Install
+
+```sh
+cargo install --git https://github.com/uintptr/rununtil.git
+```
