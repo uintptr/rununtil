@@ -8,6 +8,12 @@ Run a command until a given wall-clock time, then kill it.
 cargo install --git https://github.com/uintptr/rununtil.git
 ```
 
+## Uninstall
+
+```sh
+cargo uninstall rununtil
+```
+
 ## Usage
 
 ```
