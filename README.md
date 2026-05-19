@@ -2,6 +2,12 @@
 
 Run a command until a given wall-clock time, then kill it.
 
+## Install
+
+```sh
+cargo install --git https://github.com/uintptr/rununtil.git
+```
+
 ## Usage
 
 ```
@@ -33,16 +39,6 @@ rununtil --time 17:00 -- ./my-server
 rununtil --time 02:30 --restart --restart-delay 30 -- ./worker
 ```
 
-Logging is via `env_logger`; set `RUST_LOG=info` for details.
+## Troubleshooting / logging
 
-## Build
-
-```sh
-cargo build --release
-```
-
-## Install
-
-```sh
-cargo install --git https://github.com/uintptr/rununtil.git
-```
+- See https://docs.rs/env_logger/0.11.10/env_logger/
