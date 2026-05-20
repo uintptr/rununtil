@@ -38,3 +38,8 @@ todo = "warn"  # Catch unfinished code before release
 unimplemented = "warn"  # Catch placeholder implementations
 unwrap_used = "warn"
 use_debug = "warn"  # Catch Debug formatting in production
+
+
+[profile.release]
+opt-level = "s"
+lto = true
