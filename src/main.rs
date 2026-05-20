@@ -1,4 +1,9 @@
-use std::{process::Command, thread::sleep};
+use std::{
+    ffi::OsStr,
+    path::Path,
+    process::{Command, Stdio},
+    thread::sleep,
+};
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Duration, Local, NaiveTime};
@@ -30,20 +35,38 @@ struct UserArgs {
     command: Vec<String>,
 }
 
-impl UserArgs {
-    pub fn command_line(&self) -> String {
-        self.command.join(" ")
-    }
-}
-
-fn time_until(target: NaiveTime) -> (i64, i64, i64) {
+fn time_until(target: NaiveTime) -> Result<(i64, i64, i64)> {
     let now = Local::now().time();
-    let mut diff = target - now; // chrono::Duration
+    let mut diff = target.signed_duration_since(now); // chrono::Duration
     if diff < Duration::zero() {
-        diff += Duration::days(1); // assume tomorrow
+        diff = diff
+            .checked_add(&Duration::days(1))
+            .ok_or_else(|| anyhow!("time warp detected"))?; // assume tomorrow
     }
     let total = diff.num_seconds();
-    (total / 3600, (total % 3600) / 60, total % 60)
+    Ok((total / 3600, (total % 3600) / 60, total % 60))
+}
+
+fn print_timeout(program: &Path, target: NaiveTime) -> Result<()> {
+    let (hours, minutes, seconds) = time_until(target)?;
+
+    print!("Running \"{}\" for", program.display());
+
+    if hours > 0 {
+        print!(" {hours} hour(s)");
+    }
+
+    if minutes > 0 {
+        print!(" {minutes} minute(s)");
+    }
+
+    if seconds > 0 {
+        print!(" {seconds} second(s)");
+    }
+
+    println!();
+
+    Ok(())
 }
 
 fn parse_time(time_spec: &str) -> Result<NaiveTime> {
@@ -71,21 +94,25 @@ fn parse_time(time_spec: &str) -> Result<NaiveTime> {
     bail!("Unknown time spec format");
 }
 
-fn run_until(seconds: f64, command_line: &[String]) -> Result<()> {
-    let program = command_line.first().ok_or_else(|| anyhow!("program is missing"))?;
-
-    let program = which(program).with_context(|| format!("Unable to find {program} in PATH"))?;
-
+fn run_until<I, S>(program: &Path, args: I, timeout: f64, quiet: bool) -> Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
     info!("program: {}", program.display());
 
-    let args = command_line.iter().skip(1);
+    let mut cmd = Command::new(program);
 
-    let mut child = Command::new(&program)
-        .args(args)
-        .spawn()
-        .with_context(|| format!("Unable to spawn {}", program.display()))?;
+    cmd.args(args);
 
-    let timeout = std::time::Duration::from_secs_f64(seconds);
+    if quiet {
+        cmd.stdout(Stdio::null());
+        cmd.stderr(Stdio::null());
+    }
+
+    let mut child = cmd.spawn().with_context(|| format!("Unable to spawn {}", program.display()))?;
+
+    let timeout = std::time::Duration::from_secs_f64(timeout);
 
     let status = if let Some(v) = child.wait_timeout(timeout)? {
         v.code().unwrap_or(-1)
@@ -108,20 +135,29 @@ fn run(args: &UserArgs) -> Result<()> {
     let now = Local::now().time();
 
     let diff = if timeout > now {
-        timeout - now
+        timeout.signed_duration_since(now)
     } else {
-        timeout - now + Duration::days(1)
+        timeout
+            .signed_duration_since(now)
+            .checked_add(&Duration::days(1))
+            .ok_or_else(|| anyhow!("time warp detected"))?
     };
 
+    //println!("{} old={} new={}", diff == new_diff, diff, new_diff);
+
+    let program = args.command.first().ok_or_else(|| anyhow!("command line is missing"))?;
+    let program = which(program).with_context(|| format!("Unable to find \"{program}\" in PATH"))?;
+
     if !args.quiet {
-        let (hours, minutes, seconds) = time_until(timeout);
-        println!("hours={hours} minutes={minutes} seconds={seconds}");
+        print_timeout(&program, timeout)?;
     }
 
     info!("timeout in seconds: {}", diff.as_seconds_f64());
-    info!("command line:       \"{}\"", args.command_line());
+    info!("command line:       \"{}\"", args.command.join(" "));
 
-    run_until(diff.as_seconds_f64(), &args.command)
+    let command_args = args.command.iter().skip(1);
+
+    run_until(&program, command_args, diff.as_seconds_f64(), args.quiet)
 }
 
 fn main() -> Result<()> {
@@ -131,7 +167,7 @@ fn main() -> Result<()> {
 
     if args.restart {
         loop {
-            run(&args).context("run failed")?;
+            run(&args)?;
             info!("sleeping for {} seconds", args.restart_delay);
             sleep(std::time::Duration::from_secs(args.restart_delay));
         }
