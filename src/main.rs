@@ -1,14 +1,14 @@
 use std::{
     ffi::OsStr,
     path::Path,
-    process::{Command, Stdio},
+    process::{Command, ExitCode, Stdio},
     thread::sleep,
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Duration, Local, NaiveTime};
 use clap::Parser;
-use log::{info, warn};
+use log::{error, info, warn};
 use wait_timeout::ChildExt;
 use which::which;
 
@@ -94,7 +94,7 @@ fn parse_time(time_spec: &str) -> Result<NaiveTime> {
     bail!("Unknown time spec format");
 }
 
-fn run_until<I, S>(program: &Path, args: I, timeout: f64, quiet: bool) -> Result<()>
+fn run_until<I, S>(program: &Path, args: I, timeout: f64, quiet: bool) -> Result<i32>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -125,10 +125,10 @@ where
 
     info!("{} returned {status}", program.display());
 
-    Ok(())
+    Ok(status)
 }
 
-fn run(args: &UserArgs) -> Result<()> {
+fn run(args: &UserArgs) -> Result<i32> {
     let timeout =
         parse_time(&args.time).with_context(|| format!("Unable to parse time spectification \"{}\"", args.time))?;
 
@@ -160,7 +160,7 @@ fn run(args: &UserArgs) -> Result<()> {
     run_until(&program, command_args, diff.as_seconds_f64(), args.quiet)
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<ExitCode> {
     let args = UserArgs::parse();
 
     env_logger::init();
@@ -172,6 +172,14 @@ fn main() -> Result<()> {
             sleep(std::time::Duration::from_secs(args.restart_delay));
         }
     } else {
-        run(&args)
+        let exit_code = match run(&args) {
+            Ok(code) => ExitCode::from(u8::try_from(code).unwrap_or(1)),
+            Err(e) => {
+                error!("{e}");
+                ExitCode::from(1)
+            }
+        };
+
+        Ok(exit_code)
     }
 }
