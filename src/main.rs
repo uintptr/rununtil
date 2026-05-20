@@ -117,7 +117,7 @@ where
     let status = if let Some(v) = child.wait_timeout(timeout)? {
         v.code().unwrap_or(-1)
     } else {
-        warn!("{} timed out, signaling...", program.display());
+        warn!("{} timed out, killing...", program.display());
         child.kill().context("Unable to kill sub process")?;
         let code = child.wait().context("Wait failure")?;
         code.code().unwrap_or(-1)
