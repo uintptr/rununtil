@@ -6,7 +6,7 @@ use std::{
     thread::sleep,
 };
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Duration, Local, NaiveTime};
 use clap::Parser;
 use log::{error, info, warn};
