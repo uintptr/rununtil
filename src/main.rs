@@ -25,6 +25,7 @@ use which::which;
 const KILL_GRACE_SECS: u64 = 5;
 
 #[derive(Parser)]
+#[command(version)]
 struct UserArgs {
     /// Time specification
     #[arg(short, long)]
