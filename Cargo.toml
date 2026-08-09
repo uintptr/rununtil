@@ -5,10 +5,11 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0"
-chrono = "0.4.44"
+chrono = "0.4.45"
 clap = { version = "4.6", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
+nix = { version = "0.31.3", features = ["signal"] }
 wait-timeout = "0.2"
 which = "8.0"
 

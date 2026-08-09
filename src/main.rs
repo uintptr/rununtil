@@ -1,7 +1,8 @@
 use std::{
     ffi::OsStr,
+    os::unix::process::CommandExt,
     path::Path,
-    process::{Command, ExitCode, Stdio},
+    process::{Child, Command, ExitCode, ExitStatus, Stdio},
     thread::sleep,
 };
 
@@ -9,8 +10,19 @@ use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, Duration, Local, NaiveTime};
 use clap::Parser;
 use log::{error, info, warn};
+use nix::{
+    errno::Errno,
+    sys::signal::{Signal, killpg},
+    unistd::Pid,
+};
 use wait_timeout::ChildExt;
 use which::which;
+
+//
+// How long the command gets to shut itself down after SIGTERM before we resort
+// to SIGKILL
+//
+const KILL_GRACE_SECS: u64 = 5;
 
 #[derive(Parser)]
 struct UserArgs {
@@ -39,9 +51,7 @@ fn time_until(target: NaiveTime) -> Result<(i64, i64, i64)> {
     let now = Local::now().time();
     let mut diff = target.signed_duration_since(now); // chrono::Duration
     if diff < Duration::zero() {
-        diff = diff
-            .checked_add(&Duration::days(1))
-            .ok_or_else(|| anyhow!("time warp detected"))?; // assume tomorrow
+        diff = diff.checked_add(&Duration::days(1)).context("time warp detected")?; // assume tomorrow
     }
     let total = diff.num_seconds();
     Ok((total / 3600, (total % 3600) / 60, total % 60))
@@ -94,6 +104,51 @@ fn parse_time(time_spec: &str) -> Result<NaiveTime> {
     bail!("Unknown time spec format");
 }
 
+fn signal_group(child: &Child, sig: Signal) -> Result<()> {
+    //
+    // The child leads its own group so its pid doubles as the group id, and
+    // since we haven't reaped it yet that pid cannot have been recycled
+    //
+    let pgid = i32::try_from(child.id()).context("pid out of range")?;
+
+    match killpg(Pid::from_raw(pgid), sig) {
+        //
+        // ESRCH means the whole group is gone already, which is what we wanted
+        //
+        Ok(()) | Err(Errno::ESRCH) => Ok(()),
+        Err(e) => Err(e)
+            .with_context(|| format!("Unable to send {} to process group {pgid}", sig.as_str())),
+    }
+}
+
+//
+// Ask the process group to exit, then kill whatever is left standing
+//
+fn stop(child: &mut Child, program: &Path) -> Result<ExitStatus> {
+    let grace = std::time::Duration::from_secs(KILL_GRACE_SECS);
+
+    //
+    // Not being able to ask nicely isn't fatal, we still have SIGKILL
+    //
+    match signal_group(child, Signal::SIGTERM) {
+        Ok(()) => {
+            if let Some(v) = child.wait_timeout(grace)? {
+                return Ok(v);
+            }
+
+            warn!(
+                "{} still running {KILL_GRACE_SECS}s after SIGTERM",
+                program.display()
+            );
+        }
+        Err(e) => warn!("{e}"),
+    }
+
+    signal_group(child, Signal::SIGKILL)?;
+
+    child.wait().context("Wait failure")
+}
+
 fn run_until<I, S>(program: &Path, args: I, timeout: f64, quiet: bool) -> Result<i32>
 where
     I: IntoIterator<Item = S>,
@@ -105,22 +160,28 @@ where
 
     cmd.args(args);
 
+    //
+    // Put the command in its own process group so that we can later signal the
+    // whole tree instead of just the process we spawned. Without this a shell
+    // script would die while everything it started keeps running.
+    //
+    cmd.process_group(0);
+
     if quiet {
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::null());
     }
 
-    let mut child = cmd.spawn().with_context(|| format!("Unable to spawn {}", program.display()))?;
+    let mut child =
+        cmd.spawn().with_context(|| format!("Unable to spawn {}", program.display()))?;
 
     let timeout = std::time::Duration::from_secs_f64(timeout);
 
     let status = if let Some(v) = child.wait_timeout(timeout)? {
         v.code().unwrap_or(-1)
     } else {
-        warn!("{} timed out, killing...", program.display());
-        child.kill().context("Unable to kill sub process")?;
-        let code = child.wait().context("Wait failure")?;
-        code.code().unwrap_or(-1)
+        warn!("{} timed out, terminating...", program.display());
+        stop(&mut child, program)?.code().unwrap_or(-1)
     };
 
     info!("{} returned {status}", program.display());
@@ -129,8 +190,8 @@ where
 }
 
 fn run(args: &UserArgs) -> Result<i32> {
-    let timeout =
-        parse_time(&args.time).with_context(|| format!("Unable to parse time spectification \"{}\"", args.time))?;
+    let timeout = parse_time(&args.time)
+        .with_context(|| format!("Unable to parse time spectification \"{}\"", args.time))?;
 
     let now = Local::now().time();
 
@@ -140,13 +201,12 @@ fn run(args: &UserArgs) -> Result<i32> {
         timeout
             .signed_duration_since(now)
             .checked_add(&Duration::days(1))
-            .ok_or_else(|| anyhow!("time warp detected"))?
+            .context("time warp detected")?
     };
 
-    //println!("{} old={} new={}", diff == new_diff, diff, new_diff);
-
-    let program = args.command.first().ok_or_else(|| anyhow!("command line is missing"))?;
-    let program = which(program).with_context(|| format!("Unable to find \"{program}\" in PATH"))?;
+    let program = args.command.first().context("command line is missing")?;
+    let program =
+        which(program).with_context(|| format!("Unable to find \"{program}\" in PATH"))?;
 
     if !args.quiet {
         print_timeout(&program, timeout)?;
