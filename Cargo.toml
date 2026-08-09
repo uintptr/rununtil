@@ -1,6 +1,6 @@
 [package]
 name = "rununtil"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2024"
 
 [dependencies]
@@ -39,7 +39,6 @@ todo = "warn"  # Catch unfinished code before release
 unimplemented = "warn"  # Catch placeholder implementations
 unwrap_used = "warn"
 use_debug = "warn"  # Catch Debug formatting in production
-
 
 [profile.release]
 opt-level = "s"
